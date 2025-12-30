@@ -349,6 +349,7 @@ set(TSERVER_MAIN_DEPS
     yb_process_wrapper
     yb_pgwrapper
     ysql_conn_mgr_wrapper
+    yb_hello_wrapper
     ${YB_BASE_LIBS})
 
 ADD_YB_LIBRARY(tserver_main_impl

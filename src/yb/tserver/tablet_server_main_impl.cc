@@ -78,6 +78,7 @@
 #include "yb/yql/process_wrapper/process_wrapper.h"
 #include "yb/yql/redis/redisserver/redis_server.h"
 #include "yb/yql/ysql_conn_mgr_wrapper/ysql_conn_mgr_wrapper.h"
+#include "yb/yql/hello_wrapper/hello_wrapper.h"
 
 using std::string;
 using namespace std::placeholders;
@@ -127,6 +128,10 @@ DECLARE_bool(start_pgsql_proxy);
 DECLARE_bool(enable_ysql_conn_mgr_stats);
 DECLARE_uint32(ysql_conn_mgr_port);
 DECLARE_bool(ysql_conn_mgr_use_unix_conn);
+
+DECLARE_bool(enable_hello_service);
+DECLARE_string(hello_service_message);
+DECLARE_int32(hello_service_interval);
 
 
 namespace yb {
@@ -237,6 +242,7 @@ struct Services {
   std::unique_ptr<boost::asio::io_service> io_service;
   scoped_refptr<Thread> io_service_thread;
   std::unique_ptr<LlvmProfileDumper> llvm_profile_dumper;
+  std::unique_ptr<hello_wrapper::HelloServiceSupervisor> hello_service_supervisor;
 };
 
 // StartServices borrows its output as a reference so that the Services object is not allocated
@@ -392,6 +398,34 @@ Status StartServices(Services& services) {
         services.io_service.get(), &services.io_service_thread));
   }
 
+  // =========================================================================
+  // START HELLO PYTHON SERVICE (Demo)
+  // =========================================================================
+  if (FLAGS_enable_hello_service) {
+    LOG(INFO) << "======================================================";
+    LOG(INFO) << "Starting Hello Python Service (Demo)...";
+    LOG(INFO) << "======================================================";
+    
+    hello_wrapper::HelloServiceConf hello_conf;
+    hello_conf.message = FLAGS_hello_service_message;
+    hello_conf.interval = FLAGS_hello_service_interval;
+    
+    LOG(INFO) << "Hello Service Configuration:";
+    LOG(INFO) << "  Message: " << hello_conf.message;
+    LOG(INFO) << "  Interval: " << hello_conf.interval << "s";
+    LOG(INFO) << "  Python: (using YugabyteDB venv)";
+    
+    services.hello_service_supervisor =
+        std::make_unique<hello_wrapper::HelloServiceSupervisor>(hello_conf);
+    
+    RETURN_NOT_OK(services.hello_service_supervisor->Start());
+    
+    LOG(INFO) << "Hello Python Service started successfully!";
+    LOG(INFO) << "======================================================";
+  } else {
+    LOG(INFO) << "Hello Service disabled (use --enable_hello_service to enable)";
+  }
+
   services.llvm_profile_dumper = std::make_unique<LlvmProfileDumper>();
   return services.llvm_profile_dumper->Start();
 }
@@ -414,6 +448,12 @@ Status ShutdownServicesImpl(Services& services) {
   if (services.redis_server) {
     LOG(WARNING) << "Stopping Redis server";
     services.redis_server->Shutdown();
+  }
+
+  if (services.hello_service_supervisor) {
+    LOG(WARNING) << "Stopping Hello Python Service";
+    services.hello_service_supervisor->Stop();
+    LOG(INFO) << "Hello Python Service stopped";
   }
 
   // We must stop the pg backend supervisor before shutting down the tserver.
